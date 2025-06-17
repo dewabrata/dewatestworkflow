@@ -1,0 +1,66 @@
+name: Java CI Pipeline
+
+on:
+  push:
+    branches: [ develop ] # Jalankan saat ada push ke branch develop
+  pull_request:
+    branches: [ develop ] # Jalankan saat ada Pull Request ke branch develop
+
+jobs:
+  build_and_test:
+    runs-on: ubuntu-latest # Gunakan runner Ubuntu terbaru yang disediakan GitHub
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4 # Action untuk mengambil kode dari repositori
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4 # Action untuk menyiapkan lingkungan Java
+        with:
+          java-version: '17' # Tentukan versi Java
+          distribution: 'temurin' # Tentukan distribusi JDK (Adoptium Temurin adalah pilihan populer)
+          cache: maven # Aktifkan caching untuk dependensi Maven
+
+      - name: Build and test with Maven
+        run: mvn -B package --file pom.xml # Perintah untuk build dan test menggunakan Maven
+        # '-B' atau '--batch-mode' menjalankan Maven dalam mode non-interaktif
+        # 'package' akan mengompilasi, menjalankan tes, dan mem-package aplikasi
+        # Alternatif: 'mvn -B verify' juga menjalankan pemeriksaan tambahan
+
+
+
+build_and_push_image:
+    runs-on: ubuntu-latest
+    needs: build_and_test # Pastikan job ini berjalan setelah build_and_test selesai
+    # Hanya jalankan job ini jika event adalah push ke branch main atau develop
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    permissions:
+      contents: read      # Diperlukan untuk checkout
+      packages: write     # Diperlukan untuk push image ke GHCR
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }} # Username aktor yang menjalankan workflow
+          password: ${{ secrets.GITHUB_TOKEN }} # Token sementara yang dibuat GitHub
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta # Memberi ID pada step ini agar outputnya bisa direferensikan
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }} # github.repository formatnya USERNAME/REPONAME
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context:. # Konteks build adalah root direktori repositori
+          push: true # Set true untuk mendorong image setelah build
+          tags: ${{ steps.meta.outputs.tags }} # Gunakan tag yang dihasilkan oleh metadata-action
+          labels: ${{ steps.meta.outputs.labels }} # Gunakan label yang dihasilkan
+          # (Opsional) Tambahkan caching untuk layer Docker untuk mempercepat build berikutnya
+          # cache-from: type=gha
+          # cache-to: type=gha,mode=max
